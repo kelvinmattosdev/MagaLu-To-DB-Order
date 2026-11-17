@@ -1,40 +1,14 @@
 import pg from "pg";
 import crypto from "node:crypto";
-import { dbMagaluConfig, dbTokensConfig } from "../config/config";
-
-type GetTokensMagalu = {
-    company: string;
-    access_token: string;
-};
+import { dbMagaluConfig } from "../config/config";
 
 const { Pool } = pg;
-
-export const poolTokens = new Pool({
-    connectionString: dbTokensConfig.url,
-});
 
 export const poolMagalu = new Pool({
     connectionString: dbMagaluConfig.url,
 });
 
 const MAGALU_SCHEMA = (dbMagaluConfig as any).schema ?? "magazine_luiza";
-
-/**
- * Lê tokens Magalu (até 3) do DB de tokens.
- */
-export async function getTokensMagalu(): Promise<Array<GetTokensMagalu>> {
-    const row = await poolTokens.query(
-        `SELECT company, access_token
-         FROM ${dbTokensConfig.schema}.${dbTokensConfig.table}
-         WHERE provider = 'magalu'
-         LIMIT 3`
-    );
-
-    return row.rows.map((r: any) => ({
-        company: r.company,
-        access_token: r.access_token,
-    }));
-}
 
 /**
  * Persiste automaticamente QUALQUER payload Magalu:

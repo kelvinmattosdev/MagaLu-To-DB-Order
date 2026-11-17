@@ -19,6 +19,7 @@
   "dependencies": {
     "@refigure/magalu-api": "^1.2.0",
     "chalk": "^5.6.2",
+    "magalu-to-db": ".",
     "pg": "^8.20.0"
   }
 }

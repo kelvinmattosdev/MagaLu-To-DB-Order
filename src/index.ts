@@ -1,159 +1,15 @@
 import chalk from "chalk";
-import { getTokensMagalu, persistMagaluApiResponse, poolMagalu, poolTokens } from "./services/database.service";
-import { MagaluAPI } from "@refigure/magalu-api";
-
-const mask = (s: string) => s.slice(0, 6) + "..." + s.slice(-4);
+import { persistMagaluApiResponse, poolMagalu } from "./services/database.service";
+import { TokenManager, TokenManagerError } from "./services/token-manager.service";
+import { MagaluOrdersClient } from "./services/magalu-orders.service";
+import { tokenManagerConfig } from "./config/config";
+import { createSyncWindow } from "./config/sync-window";
 
 const REQUIRED_COMPANIES = ["jaupesca", "ltsports", "jaufishing"] as const;
 type RequiredCompany = (typeof REQUIRED_COMPANIES)[number];
 
 export type MagaluTokensByCompany = Record<RequiredCompany, string>;
-type MagaluMap = Record<RequiredCompany, MagaluAPI>
-
-// //TODO [DEBUG]
-// type PathStyle = "dot" | "jsonpath";
-
-// type FindKeyOptions = {
-//     includeUndefined?: boolean;
-//     maxDepth?: number;
-//     pathStyle?: PathStyle;
-
-//     // Agora tipado com 3 args (path, value, parent)
-//     onMatch?: (path: string, value: unknown, parent: Record<string, unknown> | unknown[] | null) => void;
-// };
-
-// const isObjectLike = (v: unknown): v is Record<string, unknown> | unknown[] =>
-//     typeof v === "object" && v !== null;
-
-// const isValidIdentifier = (k: string): boolean => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(k);
-
-// /**
-//  * Busca recursivamente por uma chave (ex: "uuid") dentro de qualquer estrutura (obj/array)
-//  * e chama onMatch com (path, value, parent).
-//  */
-// export function findKeyRecursive(
-//     root: unknown,
-//     targetKey: string,
-//     opts: FindKeyOptions = {},
-// ): void {
-//     const {
-//         includeUndefined = false,
-//         maxDepth = Number.POSITIVE_INFINITY,
-//         pathStyle = "dot",
-//         onMatch = (path: string, value: unknown) => {
-//             // default: loga como você pediu
-//             // eslint-disable-next-line no-console
-//             console.log(`${path} : ${String(value)}`);
-//         },
-//     } = opts;
-
-//     const seen = new WeakSet<object>();
-
-//     const makePath = (base: string, key: string | number): string => {
-//         const isIndex = typeof key === "number";
-
-//         if (pathStyle === "jsonpath") {
-//             if (isIndex) return `${base}[${key}]`;
-//             const kk = String(key);
-//             return isValidIdentifier(kk)
-//                 ? `${base}.${kk}`
-//                 : `${base}['${kk.replaceAll("'", "\\'")}']`;
-//         }
-
-//         // dot
-//         if (isIndex) return `${base}[${key}]`;
-//         const kk = String(key);
-//         return isValidIdentifier(kk)
-//             ? `${base}.${kk}`
-//             : `${base}["${kk.replaceAll('"', '\\"')}"]`;
-//     };
-
-//     const walk = (node: unknown, path: string, depth: number): void => {
-//         if (depth > maxDepth) return;
-//         if (!isObjectLike(node)) return;
-
-//         // evita loop em estruturas com referência circular
-//         if (seen.has(node as object)) return;
-//         seen.add(node as object);
-
-//         if (Array.isArray(node)) {
-//             for (let i = 0; i < node.length; i++) {
-//                 walk(node[i], makePath(path, i), depth + 1);
-//             }
-//             return;
-//         }
-
-//         // objeto (Record<string, unknown>)
-//         for (const [k, v] of Object.entries(node)) {
-//             const nextPath = makePath(path, k);
-
-//             if (k === targetKey) {
-//                 if (includeUndefined || v !== undefined) {
-//                     onMatch(nextPath, v, node);
-//                 }
-//             }
-
-//             walk(v, nextPath, depth + 1);
-//         }
-//     };
-
-//     const start = "$";
-//     walk(root, start, 0);
-// }
-
-// /* --------- opcional: coletar resultados --------- */
-// export function collectKeyPaths(
-//     root: unknown,
-//     targetKey: string,
-//     opts: Omit<FindKeyOptions, "onMatch"> = {},
-// ): Array<{ path: string; value: unknown }> {
-//     const out: Array<{ path: string; value: unknown }> = [];
-//     findKeyRecursive(root, targetKey, {
-//         ...opts,
-//         onMatch: (path, value) => out.push({ path, value }),
-//     });
-//     return out;
-// }
-// //TODO [DEBUG]
-
-function assertAllTokens<K extends string>(
-    tokens: Partial<Record<K, string>>,
-    required: readonly K[]
-): asserts tokens is Record<K, string> {
-    const missing: K[] = [];
-
-    for (const key of required) {
-        if (!tokens[key]) missing.push(key);
-    }
-
-    if (missing.length) {
-        throw new Error(`Tokens não encontrados para: ${missing.join(", ")}`);
-    }
-}
-
-async function captureAccessTokenMagalu(): Promise<MagaluTokensByCompany> {
-    const tokensRaw = await getTokensMagalu();
-
-    const tokens = Object.fromEntries(
-        tokensRaw
-            .filter(
-                (t) =>
-                    REQUIRED_COMPANIES.includes(t.company as RequiredCompany) &&
-                    Boolean(t.access_token)
-            )
-            .map((t) => [t.company, t.access_token as string])
-    ) as Partial<Record<RequiredCompany, string>>;
-
-    assertAllTokens(tokens, REQUIRED_COMPANIES);
-    // console.log(chalk.bgBlueBright('                                   ')); //TODO [DEBUG]
-    // console.log(chalk.greenBright('Tokens capturados:')); //TODO [DEBUG]
-    // console.log( //TODO [DEBUG]
-    //     Object.fromEntries(Object.entries(tokens).map(([k, v]) => [k, mask(v)])) //TODO [DEBUG]
-    // ); //TODO [DEBUG]
-    // console.log(chalk.bgBlueBright('                                   ')); //TODO [DEBUG]
-
-    return tokens; // ✅ aqui o TS sabe que é Record<RequiredCompany, string>
-}
+type MagaluMap = Record<RequiredCompany, MagaluOrdersClient>
 
 function fromEntriesTyped<K extends string, V>(
     entries: readonly (readonly [K, V])[],
@@ -178,11 +34,12 @@ const RETRY_BASE_DELAY_MS = 2_000;
 const sleep = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 function isRetriableMagaluRequestError(error: unknown): boolean {
+    if (error instanceof TokenManagerError || (error instanceof Error && error.message.startsWith("Token Manager:"))) return false;
     if (!(error instanceof Error)) return true;
 
     const statusMatch = error.message.match(/failed with status (\d{3})/i);
     if (!statusMatch) {
-        // A biblioteca não encapsula erros de rede do fetch em uma mensagem HTTP.
+        // Falhas de transporte não contêm um status HTTP.
         return !/falha de autentica[cç][aã]o|access token/i.test(error.message);
     }
 
@@ -191,13 +48,15 @@ function isRetriableMagaluRequestError(error: unknown): boolean {
 }
 
 async function getOrdersPageWithRetry(
-    api: MagaluAPI,
+    api: MagaluOrdersClient,
     company: RequiredCompany,
     offset: number,
+    filters: ReturnType<typeof createSyncWindow>["filters"],
 ) {
     for (let attempt = 1; attempt <= MAX_REQUEST_ATTEMPTS; attempt++) {
         try {
-            return await api.orders.getListPedidos({
+            return await api.getListPedidos({
+                ...filters,
                 _limit: PAGE_LIMIT,
                 _offset: offset,
                 _sort: "purchased_at:asc",
@@ -228,26 +87,19 @@ async function getOrdersPageWithRetry(
 (async () => {
     let exitCode = 0;
     try {
-        const tokens = await captureAccessTokenMagalu();
-
-        Object.entries(tokens).forEach(([key, value]) => {
-            console.log(chalk.greenBright(key + ": OK!")); // mask(value))); //TODO Somente para debug (é só pra aparecer, não é necessário para funcionar)
+        const syncWindow = createSyncWindow({
+            SYNC_MODE: process.env.SYNC_MODE,
+            SYNC_LOOKBACK_DAYS: process.env.SYNC_LOOKBACK_DAYS,
         });
-
+        console.log(chalk.blueBright(syncWindow.mode === "full"
+            ? "Sincronização completa: todos os pedidos, sem filtro de data."
+            : `Sincronização por atualização: ${syncWindow.filters.updated_at__gte} até ${syncWindow.filters.updated_at__lte} (UTC).`));
+        const tokenManager = new TokenManager(tokenManagerConfig);
+        await tokenManager.initialize(REQUIRED_COMPANIES);
+        for (const company of REQUIRED_COMPANIES) console.log(chalk.greenBright(company + ": OK!"));
         const magaluMap: MagaluMap = fromEntriesTyped(
-            REQUIRED_COMPANIES.map((c) => [c, new MagaluAPI({ 
-                baseUrl: "https://api.magalu.com",
-                accessToken: tokens[c],
-                refreshTokenFn: async () => {
-                    console.log(chalk.red("Access Token Inválido... Buscando outro..."));
-                    await new Promise((resolve) => setTimeout(resolve, 60 * 1000)); //? Espera 1 minuto antes de buscar um novo token
-                    const tokens: Record<string, string> = await captureAccessTokenMagalu();
-                    console.log(chalk.red("Access Token Novo. Tentando novamente..."));
-                    return tokens[c]!;
-                },
-                maxConsecutiveRefreshFails: 500 //? Isso equivale a 10 tentativas antes de dar "ERRO" (porque está em chunks)
-            })])
-        ) satisfies MagaluMap;
+            REQUIRED_COMPANIES.map(company => [company, new MagaluOrdersClient(tokenManager, company)] as const)
+        );
 
         for (const company of REQUIRED_COMPANIES) {
             console.log(chalk.bgBlueBright.bold(`                     EMPRESA: ${company.toUpperCase()}                     `));
@@ -269,7 +121,7 @@ async function getOrdersPageWithRetry(
                 // Limita a concorrência para reduzir pressão sobre a API.
                 const batch = await Promise.all(
                     offsets.map(async (offset) => {
-                        const res = await getOrdersPageWithRetry(api, company, offset);
+                        const res = await getOrdersPageWithRetry(api, company, offset, syncWindow.filters);
 
                         const results = Array.isArray(res.results) ? res.results : [];
                         return { offset, res, count: results.length };
@@ -322,7 +174,7 @@ async function getOrdersPageWithRetry(
         exitCode = 1;
     }
     finally {
-        await Promise.allSettled([poolMagalu.end(), poolTokens.end()]);
+        await Promise.allSettled([poolMagalu.end()]);
         process.exit(exitCode);
     }
 })();
